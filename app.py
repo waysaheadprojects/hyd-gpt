@@ -233,7 +233,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 async def main():
     # === Title ===
-    st.markdown("<h1>Retailopedia Agent</h1>", unsafe_allow_html=True)
+    st.markdown("<h1>Retail Agent</h1>", unsafe_allow_html=True)
 
     # === Fresh fact on each load ===
     fact = await get_latest_retail_news()

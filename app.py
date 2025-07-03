@@ -115,6 +115,7 @@ Context: {context}
     return create_retrieval_chain(chain, create_stuff_documents_chain(llm, prompt))
 
 async def vector_lookup(query: str) -> str:
+    """Look up query in the vector store and return answer + Hyderabad fact."""
     docs = vs.similarity_search(query, k=5)
     if not docs:
         return "❌ No vector match."
@@ -125,10 +126,12 @@ async def vector_lookup(query: str) -> str:
     return f"{result['answer']}\n\n💡 **Hyderabad Retail Fact:** {fact}"
 
 async def chitchat_tool(query: str) -> str:
+    """Fallback chit-chat tool for casual replies with Hyderabad fact."""
     prompt = f'User said: "{query}". Reply politely in 1–2 lines.'
     resp = (await llm.ainvoke(prompt)).content.strip()
     fact = await get_hyderabad_fact()
     return f"{resp}\n\n💡 **Hyderabad Retail Fact:** {fact}"
+
 
 # === GPTResearcher logs handler ===
 class CustomLogsHandler:
@@ -139,6 +142,13 @@ class CustomLogsHandler:
         self.logs.append(data)
 
 async def run_gpt_researcher(query: str, logs_handler: CustomLogsHandler) -> str:
+    """
+    Run the GPTResearcher agent to conduct deep research on the given query.
+
+    This tool generates a detailed research report based on the query,
+    streams logs for live progress, and appends a fresh Hyderabad retail fact.
+    Returns the final report as a string.
+    """
     researcher = GPTResearcher(
         query=query,
         report_type="research_report",
@@ -150,6 +160,7 @@ async def run_gpt_researcher(query: str, logs_handler: CustomLogsHandler) -> str
     report = await researcher.write_report()
     fact = await get_hyderabad_fact()
     return f"{report}\n\n💡 **Hyderabad Retail Fact:** {fact}"
+
 
 def run_gpt_researcher_sync(query: str, logs_handler: CustomLogsHandler) -> str:
     return asyncio.get_event_loop().run_until_complete(run_gpt_researcher(query, logs_handler))

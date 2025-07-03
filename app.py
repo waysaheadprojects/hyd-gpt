@@ -193,7 +193,7 @@ async def vector_lookup(query: str) -> str:
     chain = get_rag_chain(get_retriever_chain())
     result = await chain.ainvoke({"chat_history": [], "input": query, "context": context})
     fact = await get_latest_retail_news()
-    return f"{result['answer']}\n\n💡 **Hyderabad Retail Fact:** {fact}"
+    return f"{result['answer']}"
 
 # === Deep Research ===
 class CustomLogsHandler:

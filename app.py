@@ -107,18 +107,25 @@ else:
     st.title("🚀 Retail Hyderabad Agent")
     uploaded_file = st.file_uploader("Upload your PDF to index", type=["pdf"])
     if uploaded_file:
-        with st.spinner("Indexing..."):
-            pdf_bytes = uploaded_file.read()
-            pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            pages = [page.get_text().strip() for page in pdf_doc if page.get_text().strip()]
-            docs = [Document(page_content=t) for t in pages]
-            if docs:
-                vs = FAISS.from_documents(docs, embeddings)
-                vs.save_local(INDEX_PATH)
-                st.success("✅ Vector store created! Please reload.")
-            else:
-                st.warning("No text found.")
-    st.stop()
+      with st.spinner("Indexing..."):
+          # === Save uploaded file to my-docs ===
+          os.makedirs("my-docs", exist_ok=True)
+          save_path = os.path.join("my-docs", uploaded_file.name)
+          with open(save_path, "wb") as f:
+              f.write(uploaded_file.getbuffer())
+  
+          # === Read text for vector ===
+          pdf_bytes = uploaded_file.read()
+          pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+          pages = [page.get_text().strip() for page in pdf_doc if page.get_text().strip()]
+          docs = [Document(page_content=t) for t in pages]
+          if docs:
+              vs = FAISS.from_documents(docs, embeddings)
+              vs.save_local(INDEX_PATH)
+              st.success(f"✅ Vector store created & file saved to my-docs! Reload to use it.")
+          else:
+              st.warning("No text found.")
+
 
 # === RAG Chain with fallback ===
 def get_retriever_chain():

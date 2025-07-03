@@ -1,0 +1,28 @@
+[server]
+maxUploadSize = 2000
+enableCORS = false
+enableXsrfProtection = false
+maxMessageSize = 5000
+headless = true
+port = 8501
+
+[client]
+caching = "never"
+showErrorDetails = true
+
+[deprecation]
+showfileUploaderEncoding = false
+
+[global]
+dataFrameSerialization = "legacy"
+
+[runner]
+magicEnabled = true
+fastReruns = true
+enforceSerializableSessionState = false
+
+[theme]
+base = "light"
+
+[logger]
+level = "debug"

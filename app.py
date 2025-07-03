@@ -251,7 +251,7 @@ async def main():
             if asyncio.iscoroutine(answer):
                 answer = await answer
             st.session_state.messages.append({"role": "assistant", "content": answer})
-        st.experimental_rerun()
+        st.rerun()
 
     # Start Deep Research
     if run_deep:

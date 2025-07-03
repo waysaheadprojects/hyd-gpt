@@ -109,7 +109,7 @@ async def get_latest_retail_news() -> str:
         return "\n\n".join(items)
 
     # fallback
-    prompt = "Give me 2 interesting facts about Hyderabad retail or Inorbit Mall."
+    prompt = "Give me 2 interesting facts about Hyderabad retail with numbers and give just the intuitive fact."
     fallback = await llm.ainvoke(prompt)
     return fallback.content.strip()
 

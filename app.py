@@ -220,7 +220,7 @@ graph.add_edge("vector", END)
 agent = graph.compile()
 
 async def main():
-    st.markdown("<h1>Retail Hyderabad Agent</h1>", unsafe_allow_html=True)
+    st.markdown("<h1>Retail Agent</h1>", unsafe_allow_html=True)
 
     fact = await get_latest_retail_news()
     st.info(f"💡 **Hyderabad Retail Fact:** {fact}")
@@ -241,7 +241,7 @@ async def main():
     with col1:
         query = st.text_input(
             "",
-            placeholder="Ask anything about Hyderabad retail...",
+            placeholder="Ask anything about retail...",
             label_visibility="collapsed",
             key="query_input"
         )

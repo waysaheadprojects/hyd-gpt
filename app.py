@@ -182,7 +182,7 @@ async def run_gpt_researcher(query: str, logs_handler: CustomLogsHandler) -> str
     )
     await researcher.conduct_research()
     report = await researcher.write_report()
-    fact = await get_hyderabad_fact()
+    fact = await get_latest_retail_news()
     return f"{report}\n\n💡 **Hyderabad Retail Fact:** {fact}"
 
 def run_gpt_researcher_sync(query: str, logs_handler: CustomLogsHandler) -> str:
@@ -216,7 +216,7 @@ async def main():
     st.markdown("<h1>Retail Hyderabad Agent</h1>", unsafe_allow_html=True)
 
     # Fresh fact every load
-    fact = await get_hyderabad_fact()
+    fact = await get_latest_retail_news()
     st.info(f"💡 **Hyderabad Retail Fact:** {fact}")
 
     # Message history
@@ -354,7 +354,7 @@ async def main():
     st.markdown("<h1>Retail Agent</h1>", unsafe_allow_html=True)
 
     # Fresh fact every load
-    fact = await get_hyderabad_fact()
+    fact = await get_latest_retail_news()
     st.info(f"💡 **Hyderabad Retail Fact:** {fact}")
 
     # Message history

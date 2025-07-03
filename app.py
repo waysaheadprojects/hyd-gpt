@@ -85,20 +85,25 @@ agent_creator.extract_json_with_regex = lambda response: None if not response el
 # === Core LLM ===
 llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.2)
 embeddings = OpenAIEmbeddings()
-tavily = TavilySearchResults(k=1)
 INDEX_PATH = "./faiss_index"
 
 # === Get Hyderabad fact ===
-async def get_hyderabad_fact():
-    """Fetch live Hyderabad retail fact"""
-    q = "News about retail."
-    try:
-        res = tavily.invoke({"query": q})
-        if res and "results" in res and res["results"]:
-            return res["results"][0]["content"].strip()
-    except Exception:
-        pass
-    return "No recent Hyderabad retail fact found."
+tavily = TavilySearchResults(k=5)
+
+async def get_latest_retail_news() -> str:
+    """Fetch reliable Hyderabad retail news."""
+    query = (
+        "latest retail news Hyderabad OR Inorbit Mall site:business-standard.com "
+        "OR site:economictimes.indiatimes.com OR site:moneycontrol.com"
+    )
+    results = tavily.invoke({"query": query})
+    if results and "results" in results and results["results"]:
+        items = [
+            f"- **{r['title']}**\n  {r['content']}\n  👉 [Read more]({r.get('url','')})"
+            for r in results["results"]
+        ]
+        return "\n".join(items)
+    return "❌ Couldn’t find fresh Hyderabad retail news right now."
 
 # === Vector ===
 if os.path.exists(INDEX_PATH):
@@ -150,12 +155,12 @@ async def vector_lookup(query: str) -> str:
     docs = vs.similarity_search(query, k=5)
     if not docs:
         fallback = await llm.ainvoke(f"User said: \"{query}\". Reply from general knowledge politely.")
-        fact = await get_hyderabad_fact()
+        fact = await get_latest_retail_news()
         return f"{fallback.content.strip()}\n\n💡 **Hyderabad Retail Fact:** {fact}"
     context = "\n\n".join([d.page_content for d in docs])
     chain = get_rag_chain(get_retriever_chain())
     result = await chain.ainvoke({"chat_history": [], "input": query, "context": context})
-    fact = await get_hyderabad_fact()
+    fact = await get_latest_retail_news()
     return f"{result['answer']}\n\n💡 **Hyderabad Retail Fact:** {fact}"
 
 # === Deep Research ===

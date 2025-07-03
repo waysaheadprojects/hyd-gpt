@@ -19,6 +19,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import StructuredTool
+from langchain_core.documents import Document  # ✅ FIXED!
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
@@ -33,7 +34,7 @@ nest_asyncio.apply()
 load_dotenv()
 os.environ["REPORT_SOURCE"] = "local"
 
-st.set_page_config(page_title="Retail Agent", page_icon="🧩")
+st.set_page_config(page_title="Perplexity Retail Agent", page_icon="🧩")
 st.markdown("""
     <style>
     body { background-color: white; }
@@ -60,9 +61,12 @@ tavily = TavilySearchResults(k=1)
 
 async def get_hyderabad_fact() -> str:
     q = "Give me one recent interesting fact about retail in Hyderabad or Inorbit Mall Hyderabad."
-    res = tavily.invoke({"query": q})
-    if res and "results" in res and res["results"]:
-        return res["results"][0]["content"].strip()
+    try:
+        res = tavily.invoke({"query": q})
+        if res and "results" in res and res["results"]:
+            return res["results"][0]["content"].strip()
+    except Exception:
+        pass
     return "No recent Hyderabad retail fact found."
 
 # === Vector store load/create ===
@@ -79,7 +83,7 @@ if vs is None:
             pdf_bytes = uploaded_file.read()
             pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             pages = [page.get_text().strip() for page in pdf_doc if page.get_text().strip()]
-            docs = [{"page_content": t} for t in pages]
+            docs = [Document(page_content=t) for t in pages]  # ✅ FIXED!
             if docs:
                 vs = FAISS.from_documents(docs, embeddings)
                 vs.save_local(INDEX_PATH)
@@ -151,8 +155,6 @@ def run_gpt_researcher_sync(query: str, logs_handler: CustomLogsHandler) -> str:
     return asyncio.get_event_loop().run_until_complete(run_gpt_researcher(query, logs_handler))
 
 # === LangGraph ===
-from langgraph_core.prompts import StructuredTool
-
 vector_tool = StructuredTool.from_function(vector_lookup)
 chitchat = StructuredTool.from_function(chitchat_tool)
 

@@ -33,7 +33,7 @@ nest_asyncio.apply()
 load_dotenv()
 os.environ["REPORT_SOURCE"] = "local"
 
-st.set_page_config(page_title="Retail Hyderabad Agent", page_icon="🧩", layout="centered")
+st.set_page_config(page_title="Retail Agent", page_icon="🧩", layout="centered")
 
 # ✅ White style + chat look
 st.markdown("""
@@ -346,7 +346,7 @@ async def main():
         st.write_stream(stream_research)
 async def main():
     # Title
-    st.markdown("<h1>Retail Hyderabad Agent</h1>", unsafe_allow_html=True)
+    st.markdown("<h1>Retail Agent</h1>", unsafe_allow_html=True)
 
     # Fresh fact every load
     fact = await get_hyderabad_fact()
@@ -482,4 +482,5 @@ async def main():
             st.session_state.deep_running = False
 
         st.write_stream(stream_research)
+
 asyncio.run(main())

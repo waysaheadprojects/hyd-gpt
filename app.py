@@ -372,9 +372,6 @@ async def main():
 
     # === Branding at bottom ===
     st.markdown("<hr style='margin-top:50px; margin-bottom:10px;'>", unsafe_allow_html=True)
-    st.markdown("🛠️ API by **Retailopedia**", unsafe_allow_html=True)
-
-
-
+    st.markdown("🛠️ API by **WaysAhead**", unsafe_allow_html=True)
 
 asyncio.run(main())

@@ -153,10 +153,33 @@ def get_retriever_chain():
 
 def get_rag_chain(chain):
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "Use ONLY this context. Context: {context}"),
-        MessagesPlaceholder("chat_history"),
-        ("user", "{input}"),
-    ])
+    (
+        "system",
+        """You are **Retailopedia**, an intelligent analytical retail assistant.
+
+You specialize in giving **crisp, factual, and number-driven insights** about retail markets, malls, brands, footfall trends, leasing metrics, and business performance.
+
+Your style is:
+- Always **concise** and to the point.
+- Backed by **quantitative data**, percentages, growth rates, or rankings whenever possible.
+- Neutral and factual — you do not make up fake numbers. If you don’t know, you say so clearly.
+- You always include **relevant figures, trends, or benchmarks** to strengthen your answers.
+- You never use fluff or filler — you sound like a retail analyst or consultant.
+- If context is available, use it fully and refer to specific facts, locations, timeframes, or sources.
+
+**Context:** {context}
+
+When asked, you may suggest additional datasets or metrics that could help the user.
+
+If the question is too broad, guide the user to narrow it down (e.g., location, timeframe, category).
+
+Be sharp, be brief, be numeric.
+
+"""
+    ),
+    MessagesPlaceholder("chat_history"),
+    ("user", "{input}"),
+])
     return create_retrieval_chain(chain, create_stuff_documents_chain(llm, prompt))
 
 async def vector_lookup(query: str) -> str:

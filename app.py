@@ -344,4 +344,142 @@ async def main():
             st.session_state.deep_running = False
 
         st.write_stream(stream_research)
+async def main():
+    # Title
+    st.markdown("<h1>Retail Hyderabad Agent</h1>", unsafe_allow_html=True)
 
+    # Fresh fact every load
+    fact = await get_hyderabad_fact()
+    st.info(f"💡 **Hyderabad Retail Fact:** {fact}")
+
+    # Message history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    if "deep_running" not in st.session_state:
+        st.session_state.deep_running = False
+
+    # Render messages
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            st.markdown(f"<div class='user-msg'>👤 {msg['content']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='bot-msg'>🤖 {msg['content']}</div>", unsafe_allow_html=True)
+
+    # Input + buttons
+    col1, col2, col3 = st.columns([8, 1, 1])
+    with col1:
+        query = st.text_input(
+            "",
+            placeholder="Ask anything about Hyderabad retail...",
+            label_visibility="collapsed",
+            key="query_input"
+        )
+    with col2:
+        send = st.button("➡️")
+    with col3:
+        run_deep = st.button("🚀")
+
+    # Handle ➡️
+    if send and query:
+        st.session_state.messages.append({"role": "user", "content": query})
+        with st.spinner("Thinking..."):
+            result = await agent.ainvoke(State(query=query))
+            answer = result["answer"]
+            if asyncio.iscoroutine(answer):
+                answer = await answer
+            st.session_state.messages.append({"role": "assistant", "content": answer})
+        st.experimental_rerun()
+
+    # Start Deep Research
+    if run_deep:
+        if not query.strip():
+            st.warning("Enter a topic first.")
+        else:
+            st.session_state.deep_running = True
+
+    # If flag is on: run Deep Research output inline
+    if st.session_state.deep_running:
+        def stream_research():
+            logs_handler = CustomLogsHandler()
+            result_holder = {"report": ""}
+
+            def run_and_store():
+                result_holder["report"] = run_gpt_researcher_sync(query, logs_handler)
+
+            t = threading.Thread(target=run_and_store)
+            t.start()
+
+            last_index = 0
+            while t.is_alive():
+                time.sleep(1)
+                new_logs = logs_handler.logs[last_index:]
+                for log in new_logs:
+                    yield f"🔍 **{log.get('content','')}**\n\n{log.get('output','')}\n\n---"
+                last_index += len(new_logs)
+
+            final_report = result_holder["report"]
+            yield f"\n\n## ✅ Final Report\n\n{final_report}"
+
+            # === Create stylish PDF ===
+            pdf_buffer = BytesIO()
+            doc = SimpleDocTemplate(pdf_buffer, pagesize=LETTER)
+            styles = getSampleStyleSheet()
+            story = []
+
+            for line in final_report.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                elif line.startswith("# "):
+                    story.append(Paragraph(f"<b>{line.strip('# ').strip()}</b>", styles["Heading1"]))
+                elif line.startswith("## "):
+                    story.append(Paragraph(f"<b>{line.strip('# ').strip()}</b>", styles["Heading2"]))
+                elif "|" in line:
+                    # Treat as markdown table row
+                    cols = [c.strip() for c in line.split("|") if c.strip()]
+                    if not hasattr(stream_research, "_table_buffer"):
+                        stream_research._table_buffer = []
+                    stream_research._table_buffer.append(cols)
+                else:
+                    if hasattr(stream_research, "_table_buffer") and stream_research._table_buffer:
+                        from reportlab.platypus import Table, TableStyle
+                        table = Table(stream_research._table_buffer)
+                        table.setStyle(TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), "#d0d0d0"),
+                            ("GRID", (0, 0), (-1, -1), 1, "black"),
+                            ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+                        ]))
+                        story.append(table)
+                        story.append(Spacer(1, 12))
+                        stream_research._table_buffer = []
+                    story.append(Paragraph(f"<b>{line}</b>", styles["BodyText"]))
+                    story.append(Spacer(1, 6))
+
+            if hasattr(stream_research, "_table_buffer") and stream_research._table_buffer:
+                from reportlab.platypus import Table, TableStyle
+                table = Table(stream_research._table_buffer)
+                table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), "#d0d0d0"),
+                    ("GRID", (0, 0), (-1, -1), 1, "black"),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+                ]))
+                story.append(table)
+                story.append(Spacer(1, 12))
+                stream_research._table_buffer = []
+
+            doc.build(story)
+            pdf_buffer.seek(0)
+
+            st.download_button(
+                "📄 Download Stylish Report as PDF",
+                data=pdf_buffer,
+                file_name="deep_research_stylish.pdf",
+                mime="application/pdf"
+            )
+
+            # Reset flag
+            st.session_state.deep_running = False
+
+        st.write_stream(stream_research)
+asyncio.run(main())

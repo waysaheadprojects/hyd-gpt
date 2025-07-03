@@ -531,7 +531,6 @@ async def main():
 
             st.session_state.deep_running = False
 
-        st.write_stream(stream_research)
-
+        st.write_stream(stream_research())
 
 asyncio.run(main())

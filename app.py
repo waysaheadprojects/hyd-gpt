@@ -33,9 +33,9 @@ nest_asyncio.apply()
 load_dotenv()
 os.environ["REPORT_SOURCE"] = "local"
 
-st.set_page_config(page_title="Retail Hyderabad Researcher", page_icon="🚀", layout="centered")
+st.set_page_config(page_title="Retail Hyderabad Agent", page_icon="🧩", layout="centered")
 
-# ✅ White style
+# ✅ White style + chat look
 st.markdown("""
 <style>
 body {
@@ -55,13 +55,25 @@ h1 {
   text-align: center;
   font-size: 4rem;
   color: #111;
-  font-weight: 600;
+  font-weight: 700;
 }
 h2, h3, h4, p, label {
   color: #111 !important;
 }
 .stAlert {
   background: #f0f0f0;
+}
+.user-msg {
+  background: #e0f7fa;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+}
+.bot-msg {
+  background: #f1f8e9;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -92,7 +104,7 @@ async def get_hyderabad_fact():
 if os.path.exists(INDEX_PATH):
     vs = FAISS.load_local(INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
 else:
-    st.title("🚀 Retail Hyderabad Researcher")
+    st.title("🚀 Retail Hyderabad Agent")
     uploaded_file = st.file_uploader("Upload your PDF to index", type=["pdf"])
     if uploaded_file:
         with st.spinner("Indexing..."):
@@ -108,7 +120,7 @@ else:
                 st.warning("No text found.")
     st.stop()
 
-# === RAG Chain ===
+# === RAG Chain with fallback ===
 def get_retriever_chain():
     retriever = vs.as_retriever(search_type="similarity", search_kwargs={"k": 8})
     prompt = ChatPromptTemplate.from_messages([
@@ -127,10 +139,12 @@ def get_rag_chain(chain):
     return create_retrieval_chain(chain, create_stuff_documents_chain(llm, prompt))
 
 async def vector_lookup(query: str) -> str:
-    """Look up with context + fact."""
+    """Try vector store, fallback to LLM if no match."""
     docs = vs.similarity_search(query, k=5)
     if not docs:
-        return "❌ No vector match."
+        fallback = await llm.ainvoke(f"User said: \"{query}\". Reply from general knowledge politely.")
+        fact = await get_hyderabad_fact()
+        return f"{fallback.content.strip()}\n\n💡 **Hyderabad Retail Fact:** {fact}"
     context = "\n\n".join([d.page_content for d in docs])
     chain = get_rag_chain(get_retriever_chain())
     result = await chain.ainvoke({"chat_history": [], "input": query, "context": context})
@@ -187,43 +201,44 @@ agent = graph.compile()
 
 # === UI ===
 async def main():
-    st.markdown(
-        "<h1 style='text-align: center; font-size: 4rem;'>Retail Hyderabad Agent</h1>",
-        unsafe_allow_html=True
-    )
+    st.markdown("<h1>Retail Hyderabad Agent</h1>", unsafe_allow_html=True)
 
     # ✅ Show Hyderabad fact every time
     fact = await get_hyderabad_fact()
     st.info(f"💡 **Hyderabad Retail Fact:** {fact}")
 
-    # === Compact input + buttons row ===
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # === Render old messages ===
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            st.markdown(f"<div class='user-msg'>👤 {msg['content']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='bot-msg'>🤖 {msg['content']}</div>", unsafe_allow_html=True)
+
+    # === Input & buttons ===
     col1, col2, col3 = st.columns([8, 1, 1])
     with col1:
-        query = st.text_input(
-            "",
-            placeholder="Ask anything about Hyderabad retail...",
-            label_visibility="collapsed",
-            key="query_input"
-        )
+        query = st.text_input("", placeholder="Ask anything about Hyderabad retail...", label_visibility="collapsed", key="query_input")
     with col2:
         send = st.button("➡️")
     with col3:
         run_deep = st.button("🚀")
 
-    # === Logic: normal vector search ===
     if send and query:
-        result = await agent.ainvoke(State(query=query))
-        answer = result["answer"]
-        if asyncio.iscoroutine(answer):
-            answer = await answer
-        st.write(answer)
-        if answer.startswith("❌"):
-            st.info("Try Deep Research instead!")
+        st.session_state.messages.append({"role": "user", "content": query})
+        with st.spinner("Thinking..."):
+            result = await agent.ainvoke(State(query=query))
+            answer = result["answer"]
+            if asyncio.iscoroutine(answer):
+                answer = await answer
+            st.session_state.messages.append({"role": "assistant", "content": answer})
+        st.experimental_rerun()
 
-    # === Logic: Deep Research ===
     if run_deep:
         if not query.strip():
-            st.warning("Please type a topic first.")
+            st.warning("Enter a topic first.")
         else:
             def stream_research():
                 logs_handler = CustomLogsHandler()
@@ -273,6 +288,5 @@ async def main():
                 )
 
             st.write_stream(stream_research)
-
 
 asyncio.run(main())

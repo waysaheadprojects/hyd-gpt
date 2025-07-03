@@ -24,6 +24,7 @@ import fitz  # PyMuPDF for PDF extraction
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Table, TableStyle
 
 from gpt_researcher import GPTResearcher
 import gpt_researcher.actions.agent_creator as agent_creator
@@ -267,64 +268,99 @@ async def main():
             st.session_state.deep_running = True
 
     if st.session_state.deep_running:
-        def stream_research():
-            logs_handler = CustomLogsHandler()
-            result_holder = {"report": ""}
+       def stream_research(query):
+    import requests
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Image as RLImage,
+        Table,
+        TableStyle
+    )
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib.styles import getSampleStyleSheet
 
-            def run_and_store():
-                result_holder["report"] = run_gpt_researcher_sync(query, logs_handler)
+    logs_handler = CustomLogsHandler()
+    result_holder = {"report": ""}
 
-            t = threading.Thread(target=run_and_store)
-            t.start()
+    def run_and_store():
+        result_holder["report"] = run_gpt_researcher_sync(query, logs_handler)
 
-            last_index = 0
-            logs_placeholder = st.empty()  # container for auto-scrolling
+    t = threading.Thread(target=run_and_store)
+    t.start()
 
-            while t.is_alive():
-                time.sleep(1)
-                new_logs = logs_handler.logs[last_index:]
-                for log in new_logs:
-                    logs_placeholder.markdown(
-                        f"🔍 **{log.get('content','')}**\n\n```\n{log.get('output','')}\n```",
-                        unsafe_allow_html=True
-                    )
-                last_index += len(new_logs)
+    last_index = 0
+    placeholder = st.empty()
+    streamed_html = ""
 
-            final_report = result_holder["report"]
-            yield f"\n\n## ✅ Final Report\n\n{final_report}"
+    while t.is_alive():
+        time.sleep(1)
+        new_logs = logs_handler.logs[last_index:]
+        for log in new_logs:
+            content = log.get("content", "")
+            output = log.get("output", "")
+            if "![" in output:
+                streamed_html += f"<p>{content}<br>{output}</p><hr>"
+            else:
+                streamed_html += f"<p><b>{content}</b><br>{output}</p><hr>"
+        last_index += len(new_logs)
 
-            pdf_buffer = BytesIO()
-            doc = SimpleDocTemplate(pdf_buffer, pagesize=LETTER)
-            styles = getSampleStyleSheet()
-            story = []
+        scroll_html = f"""
+        <div id="logbox" style="height:400px;overflow-y:scroll;border:1px solid #ccc;padding:1rem;">
+            {streamed_html}
+        </div>
+        <script>
+            var logbox = document.getElementById('logbox');
+            if (logbox) {{ logbox.scrollTop = logbox.scrollHeight; }}
+        </script>
+        """
+        placeholder.markdown(scroll_html, unsafe_allow_html=True)
+        yield ""
 
-            for line in final_report.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                elif line.startswith("# "):
-                    story.append(Paragraph(f"<b>{line.strip('# ').strip()}</b>", styles["Heading1"]))
-                elif line.startswith("## "):
-                    story.append(Paragraph(f"<b>{line.strip('# ').strip()}</b>", styles["Heading2"]))
-                elif "|" in line:
-                    cols = [c.strip() for c in line.split("|") if c.strip()]
-                    if not hasattr(stream_research, "_table_buffer"):
-                        stream_research._table_buffer = []
-                    stream_research._table_buffer.append(cols)
-                else:
-                    if hasattr(stream_research, "_table_buffer") and stream_research._table_buffer:
-                        table = Table(stream_research._table_buffer)
-                        table.setStyle(TableStyle([
-                            ("BACKGROUND", (0, 0), (-1, 0), "#d0d0d0"),
-                            ("GRID", (0, 0), (-1, -1), 1, "black"),
-                            ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-                        ]))
-                        story.append(table)
-                        story.append(Spacer(1, 12))
-                        stream_research._table_buffer = []
-                    story.append(Paragraph(f"<b>{line}</b>", styles["BodyText"]))
-                    story.append(Spacer(1, 6))
+    final_report = result_holder["report"]
+    streamed_html += f"<h3>✅ Final Report</h3><pre>{final_report}</pre>"
+    final_scroll_html = f"""
+    <div id="logbox" style="height:400px;overflow-y:scroll;border:1px solid #ccc;padding:1rem;">
+        {streamed_html}
+    </div>
+    <script>
+        var logbox = document.getElementById('logbox');
+        if (logbox) {{ logbox.scrollTop = logbox.scrollHeight; }}
+    </script>
+    """
+    placeholder.markdown(final_scroll_html, unsafe_allow_html=True)
+    yield ""
 
+    # === PDF ===
+    pdf_buffer = BytesIO()
+    doc = SimpleDocTemplate(pdf_buffer, pagesize=LETTER)
+    styles = getSampleStyleSheet()
+    story = []
+
+    for line in final_report.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        elif line.startswith("# "):
+            story.append(Paragraph(f"<b>{line.strip('# ').strip()}</b>", styles["Heading1"]))
+        elif line.startswith("## "):
+            story.append(Paragraph(f"<b>{line.strip('# ').strip()}</b>", styles["Heading2"]))
+        elif line.startswith("!["):
+            try:
+                img_url = line.split("(")[1].split(")")[0]
+                img_data = requests.get(img_url).content
+                img = RLImage(BytesIO(img_data), width=400, height=300)
+                story.append(img)
+                story.append(Spacer(1, 12))
+            except Exception:
+                story.append(Paragraph("<b>[Image could not load]</b>", styles["BodyText"]))
+        elif "|" in line:
+            cols = [c.strip() for c in line.split("|") if c.strip()]
+            if not hasattr(stream_research, "_table_buffer"):
+                stream_research._table_buffer = []
+            stream_research._table_buffer.append(cols)
+        else:
             if hasattr(stream_research, "_table_buffer") and stream_research._table_buffer:
                 table = Table(stream_research._table_buffer)
                 table.setStyle(TableStyle([
@@ -335,20 +371,31 @@ async def main():
                 story.append(table)
                 story.append(Spacer(1, 12))
                 stream_research._table_buffer = []
+            story.append(Paragraph(f"<b>{line}</b>", styles["BodyText"]))
+            story.append(Spacer(1, 6))
 
-            doc.build(story)
-            pdf_buffer.seek(0)
+    if hasattr(stream_research, "_table_buffer") and stream_research._table_buffer:
+        table = Table(stream_research._table_buffer)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), "#d0d0d0"),
+            ("GRID", (0, 0), (-1, -1), 1, "black"),
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 12))
+        stream_research._table_buffer = []
 
-            st.download_button(
-                "📄 Download Stylish Report as PDF",
-                data=pdf_buffer,
-                file_name="deep_research_stylish.pdf",
-                mime="application/pdf"
-            )
+    doc.build(story)
+    pdf_buffer.seek(0)
+    st.download_button(
+        "📄 Download Stylish Report as PDF",
+        data=pdf_buffer,
+        file_name="deep_research_stylish.pdf",
+        mime="application/pdf"
+    )
 
-            st.session_state.deep_running = False
+    st.session_state.deep_running = False
 
-        st.write_stream(stream_research)
 
 
 asyncio.run(main())

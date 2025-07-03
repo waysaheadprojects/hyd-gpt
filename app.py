@@ -187,21 +187,31 @@ agent = graph.compile()
 
 # === UI ===
 async def main():
-    st.markdown("<h1>perplexity</h1>", unsafe_allow_html=True)
+    st.markdown(
+        "<h1 style='text-align: center; font-size: 4rem;'>Retail Hyderabad Agent</h1>",
+        unsafe_allow_html=True
+    )
 
     # ✅ Show Hyderabad fact every time
     fact = await get_hyderabad_fact()
     st.info(f"💡 **Hyderabad Retail Fact:** {fact}")
 
-    query = st.text_input("", placeholder="Ask anything or @mention a Space", label_visibility="collapsed")
-
-    col1, col2 = st.columns([4, 1])
+    # === Compact input + buttons row ===
+    col1, col2, col3 = st.columns([8, 1, 1])
     with col1:
-        pass
+        query = st.text_input(
+            "",
+            placeholder="Ask anything about Hyderabad retail...",
+            label_visibility="collapsed",
+            key="query_input"
+        )
     with col2:
+        send = st.button("➡️")
+    with col3:
         run_deep = st.button("🚀")
 
-    if query:
+    # === Logic: normal vector search ===
+    if send and query:
         result = await agent.ainvoke(State(query=query))
         answer = result["answer"]
         if asyncio.iscoroutine(answer):
@@ -210,9 +220,10 @@ async def main():
         if answer.startswith("❌"):
             st.info("Try Deep Research instead!")
 
+    # === Logic: Deep Research ===
     if run_deep:
         if not query.strip():
-            st.warning("Enter a topic first.")
+            st.warning("Please type a topic first.")
         else:
             def stream_research():
                 logs_handler = CustomLogsHandler()
@@ -262,5 +273,6 @@ async def main():
                 )
 
             st.write_stream(stream_research)
+
 
 asyncio.run(main())

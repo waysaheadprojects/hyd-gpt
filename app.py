@@ -91,19 +91,27 @@ INDEX_PATH = "./faiss_index"
 tavily = TavilySearchResults(k=5)
 
 async def get_latest_retail_news() -> str:
-    """Fetch reliable Hyderabad retail news."""
+    """Fetch live news about Hyderabad retail, Inorbit Mall."""
     query = (
-        "latest retail news Hyderabad OR Inorbit Mall site:business-standard.com "
-        "OR site:economictimes.indiatimes.com OR site:moneycontrol.com"
+        "latest Hyderabad retail news OR Inorbit Mall site:business-standard.com "
+        "OR site:economictimes.indiatimes.com OR site:newsmeter.in"
     )
-    results = tavily.invoke({"query": query})
+    results = await tavily.ainvoke({"query": query})
+    print(results)  # Debug
+
     if results and "results" in results and results["results"]:
-        items = [
-            f"- **{r['title']}**\n  {r['content']}\n  👉 [Read more]({r.get('url','')})"
-            for r in results["results"]
-        ]
-        return "\n".join(items)
-    return "❌ Couldn’t find fresh Hyderabad retail news right now."
+        items = []
+        for r in results["results"]:
+            title = r.get("title", "No title")
+            url = r.get("url", "#")
+            content = r.get("content", "")
+            items.append(f"🔗 **{title}**\n{content}\n👉 [Read more]({url})\n")
+        return "\n\n".join(items)
+
+    # fallback
+    prompt = "Give me 2 interesting facts about Hyderabad retail or Inorbit Mall."
+    fallback = await llm.ainvoke(prompt)
+    return fallback.content.strip()
 
 # === Vector ===
 if os.path.exists(INDEX_PATH):

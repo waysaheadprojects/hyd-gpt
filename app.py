@@ -33,7 +33,7 @@ nest_asyncio.apply()
 load_dotenv()
 os.environ["REPORT_SOURCE"] = "local"
 
-st.set_page_config(page_title="Perplexity Retail Agent", page_icon="🧩")
+st.set_page_config(page_title="Retail Agent", page_icon="🧩")
 st.markdown("""
     <style>
     body { background-color: white; }

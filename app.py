@@ -233,7 +233,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 async def main():
     # === Title ===
-    st.markdown("<h1>Retail Agent</h1>", unsafe_allow_html=True)
+    st.markdown("<h1>Retailopedia Agent</h1>", unsafe_allow_html=True)
 
     # === Fresh fact on each load ===
     fact = await get_latest_retail_news()
@@ -367,10 +367,12 @@ async def main():
             )
 
             st.session_state.deep_running = False
-       
+
         st.write_stream(stream_research)
-      st.markdown("<hr style='margin-top: 50px; margin-bottom: 10px;'>", unsafe_allow_html=True)
-      st.markdown("🛠️ API by **Retailopedia**", unsafe_allow_html=True)
+
+    # === Branding at bottom ===
+    st.markdown("<hr style='margin-top:50px; margin-bottom:10px;'>", unsafe_allow_html=True)
+    st.markdown("🛠️ API by **Retailopedia**", unsafe_allow_html=True)
 
 
 

@@ -91,7 +91,7 @@ INDEX_PATH = "./faiss_index"
 # === Get Hyderabad fact ===
 async def get_hyderabad_fact():
     """Fetch live Hyderabad retail fact"""
-    q = "Give me one recent interesting fact about retail in Hyderabad or Inorbit Mall Hyderabad."
+    q = "News about retail."
     try:
         res = tavily.invoke({"query": q})
         if res and "results" in res and res["results"]:

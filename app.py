@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from io import BytesIO
 
-import fitz  # PyMuPDF for PDF text extraction
+import fitz  # PyMuPDF for PDF extraction
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import LETTER
@@ -22,17 +22,18 @@ from langchain_core.tools import StructuredTool
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
+from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.graph import StateGraph, END
+
 from gpt_researcher import GPTResearcher
 import gpt_researcher.actions.agent_creator as agent_creator
 
-# === Setup ===
+# === Init ===
 nest_asyncio.apply()
 load_dotenv()
 os.environ["REPORT_SOURCE"] = "local"
 
-# === Styling ===
-st.set_page_config(page_title="Perplexity-Style Research", page_icon="🧩")
+st.set_page_config(page_title="Perplexity Retail Agent", page_icon="🧩")
 st.markdown("""
     <style>
     body { background-color: white; }
@@ -41,7 +42,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# === Patch GPTResearcher if needed ===
+# === GPTResearcher fix ===
 original = agent_creator.extract_json_with_regex
 def safe_extract_json_with_regex(response):
     if not response:
@@ -49,24 +50,32 @@ def safe_extract_json_with_regex(response):
     return original(response)
 agent_creator.extract_json_with_regex = safe_extract_json_with_regex
 
-# === LLM & Embeddings ===
+# === Core LLM + embeddings ===
 llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.2)
 embeddings = OpenAIEmbeddings()
-
 INDEX_PATH = "./faiss_index"
 
-# === Load or init vector store ===
+# === Tavily for live Hyderabad fact ===
+tavily = TavilySearchResults(k=1)
+
+async def get_hyderabad_fact() -> str:
+    q = "Give me one recent interesting fact about retail in Hyderabad or Inorbit Mall Hyderabad."
+    res = tavily.invoke({"query": q})
+    if res and "results" in res and res["results"]:
+        return res["results"][0]["content"].strip()
+    return "No recent Hyderabad retail fact found."
+
+# === Vector store load/create ===
 if os.path.exists(INDEX_PATH):
     vs = FAISS.load_local(INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
 else:
     vs = None
 
-# === One-time PDF upload ===
 if vs is None:
     st.title("📂 Upload PDF — One Time Setup")
-    uploaded_file = st.file_uploader("Upload a PDF to index", type=["pdf"])
+    uploaded_file = st.file_uploader("Upload your PDF", type=["pdf"])
     if uploaded_file:
-        with st.spinner("Indexing... Please wait."):
+        with st.spinner("Indexing PDF..."):
             pdf_bytes = uploaded_file.read()
             pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             pages = [page.get_text().strip() for page in pdf_doc if page.get_text().strip()]
@@ -74,12 +83,12 @@ if vs is None:
             if docs:
                 vs = FAISS.from_documents(docs, embeddings)
                 vs.save_local(INDEX_PATH)
-                st.success("✅ Vector store created! Please reload the page.")
+                st.success("✅ Vector store created! Please reload.")
             else:
-                st.warning("No text found in the PDF. Try another file.")
+                st.warning("No text found. Try another PDF.")
     st.stop()
 
-# === Local vector + retriever chain ===
+# === Vector/RAG chain ===
 def get_retriever_chain():
     retriever = vs.as_retriever(search_type="similarity", search_kwargs={"k": 8})
     prompt = ChatPromptTemplate.from_messages([
@@ -93,8 +102,7 @@ def get_rag_chain(chain):
     prompt = ChatPromptTemplate.from_messages([
         ("system", """
 You are a retail research assistant.
-Use ONLY the provided context. If none, reply ❌.
-Use markdown, bullet points, or tables if helpful.
+Use ONLY this context. If none, reply ❌.
 Context: {context}
         """),
         MessagesPlaceholder("chat_history"),
@@ -109,13 +117,16 @@ async def vector_lookup(query: str) -> str:
     context = "\n\n".join([d.page_content for d in docs])
     chain = get_rag_chain(get_retriever_chain())
     result = await chain.ainvoke({"chat_history": [], "input": query, "context": context})
-    return result["answer"]
+    fact = await get_hyderabad_fact()
+    return f"{result['answer']}\n\n💡 **Hyderabad Retail Fact:** {fact}"
 
 async def chitchat_tool(query: str) -> str:
-    prompt = f'User said: "{query}". Reply nicely in 1–2 short lines.'
-    return (await llm.ainvoke(prompt)).content.strip()
+    prompt = f'User said: "{query}". Reply politely in 1–2 lines.'
+    resp = (await llm.ainvoke(prompt)).content.strip()
+    fact = await get_hyderabad_fact()
+    return f"{resp}\n\n💡 **Hyderabad Retail Fact:** {fact}"
 
-# === Logs Handler ===
+# === GPTResearcher logs handler ===
 class CustomLogsHandler:
     def __init__(self):
         self.logs: List[Dict[str, Any]] = []
@@ -132,18 +143,18 @@ async def run_gpt_researcher(query: str, logs_handler: CustomLogsHandler) -> str
         websocket=logs_handler
     )
     await researcher.conduct_research()
-    return await researcher.write_report()
+    report = await researcher.write_report()
+    fact = await get_hyderabad_fact()
+    return f"{report}\n\n💡 **Hyderabad Retail Fact:** {fact}"
 
 def run_gpt_researcher_sync(query: str, logs_handler: CustomLogsHandler) -> str:
     return asyncio.get_event_loop().run_until_complete(run_gpt_researcher(query, logs_handler))
 
-async def deep_tool_fn(query: str) -> str:
-    handler = CustomLogsHandler()
-    return await run_gpt_researcher(query, handler)
+# === LangGraph ===
+from langgraph_core.prompts import StructuredTool
 
 vector_tool = StructuredTool.from_function(vector_lookup)
 chitchat = StructuredTool.from_function(chitchat_tool)
-deep_tool = StructuredTool.from_function(deep_tool_fn)
 
 class State(BaseModel):
     query: str
@@ -151,7 +162,7 @@ class State(BaseModel):
     answer: Optional[str] = None
 
 async def router(state: State):
-    res = await llm.ainvoke(f'Classify: "{state.query}" — return vector OR chitchat.')
+    res = await llm.ainvoke(f'Classify this: "{state.query}". Return vector OR chitchat.')
     return {"route": res.content.strip().lower()}
 
 async def vector_node(state: State):
@@ -160,26 +171,19 @@ async def vector_node(state: State):
 async def chitchat_node(state: State):
     return {"answer": await chitchat.ainvoke({"query": state.query})}
 
-async def deep_node(state: State):
-    return {"answer": await deep_tool.ainvoke({"query": state.query})}
-
 graph = StateGraph(State)
 graph.add_node("router", router)
 graph.add_node("vector", vector_node)
 graph.add_node("chitchat", chitchat_node)
-graph.add_node("deep", deep_node)
-
 graph.set_entry_point("router")
 graph.add_conditional_edges("router", lambda s: s.route, {"vector": "vector", "chitchat": "chitchat"})
 graph.add_edge("vector", END)
 graph.add_edge("chitchat", END)
-graph.add_edge("deep", END)
-
 agent = graph.compile()
 
-# === Main Streamlit UI ===
+# === Main UI ===
 async def main():
-    st.title("🧩 Perplexity-Style Research")
+    st.title("🧩 Retail Hyderabad Researcher")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -188,7 +192,6 @@ async def main():
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # === Chat input ===
     prompt = st.chat_input("Ask anything...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -201,23 +204,14 @@ async def main():
             if asyncio.iscoroutine(answer):
                 answer = await answer
 
-            if answer.startswith("❌"):
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": "❌ Nothing found locally. You can run **Deep Research 🚀** below!"
-                })
-            else:
-                st.session_state.messages.append({"role": "assistant", "content": answer})
-
+            st.session_state.messages.append({"role": "assistant", "content": answer})
         st.rerun()
 
     st.divider()
-
-    # === Deep Research ===
     st.subheader("Deep Research")
-    deep_query = st.text_input("Topic for Deep Research", key="deep_query")
+    deep_q = st.text_input("Topic for Deep Research:", key="deep_query")
     if st.button("🚀 Run Deep Research"):
-        if not deep_query.strip():
+        if not deep_q.strip():
             st.warning("Please enter a topic.")
         else:
             def stream_research():
@@ -225,7 +219,7 @@ async def main():
                 result_holder = {"report": ""}
 
                 def run_and_store():
-                    result_holder["report"] = run_gpt_researcher_sync(deep_query, logs_handler)
+                    result_holder["report"] = run_gpt_researcher_sync(deep_q, logs_handler)
 
                 t = threading.Thread(target=run_and_store)
                 t.start()
@@ -245,7 +239,6 @@ async def main():
                 doc = SimpleDocTemplate(pdf_buffer, pagesize=LETTER)
                 styles = getSampleStyleSheet()
                 story = []
-
                 for line in final_report.split("\n"):
                     if line.strip().startswith("# "):
                         story.append(Paragraph(f"<b>{line.strip('# ').strip()}</b>", styles["Heading1"]))
@@ -261,13 +254,7 @@ async def main():
 
                 doc.build(story)
                 pdf_buffer.seek(0)
-
-                st.download_button(
-                    label="📄 Download Report as PDF",
-                    data=pdf_buffer,
-                    file_name="deep_research_report.pdf",
-                    mime="application/pdf"
-                )
+                st.download_button("📄 Download Report as PDF", data=pdf_buffer, file_name="deep_research.pdf", mime="application/pdf")
 
             st.write_stream(stream_research)
 

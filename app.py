@@ -241,7 +241,7 @@ async def main():
             if asyncio.iscoroutine(answer):
                 answer = await answer
             st.session_state.messages.append({"role": "assistant", "content": answer})
-        st.experimental_rerun()
+        st.rerun()
 
     if run_deep:
         if not query.strip():

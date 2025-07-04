@@ -6,7 +6,7 @@ import nest_asyncio
 from dotenv import load_dotenv
 
 import streamlit as st
-from io import BytesIO
+from io import BytesIO, StringIO
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 
@@ -21,10 +21,9 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.graph import StateGraph, END
 
 import fitz  # PyMuPDF for PDF extraction
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.pagesizes import LETTER
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Table, TableStyle
+import pandas as pd
+import matplotlib.pyplot as plt
+import re
 
 from gpt_researcher import GPTResearcher
 import gpt_researcher.actions.agent_creator as agent_creator
@@ -92,14 +91,11 @@ INDEX_PATH = "./faiss_index"
 tavily = TavilySearchResults(k=5)
 
 async def get_latest_retail_news() -> str:
-    """Fetch live news about Hyderabad retail, Inorbit Mall."""
     query = (
         "latest Hyderabad retail news OR Inorbit Mall site:business-standard.com "
         "OR site:economictimes.indiatimes.com OR site:newsmeter.in"
     )
     results = await tavily.ainvoke({"query": query})
-    print(results)  # Debug
-
     if results and "results" in results and results["results"]:
         items = []
         for r in results["results"]:
@@ -108,10 +104,7 @@ async def get_latest_retail_news() -> str:
             content = r.get("content", "")
             items.append(f"🔗 **{title}**\n{content}\n👉 [Read more]({url})\n")
         return "\n\n".join(items)
-
-    # fallback
-    prompt = "Give me 2 interesting facts about Hyderabad retail with numbers and give just the intuitive fact."
-    fallback = await llm.ainvoke(prompt)
+    fallback = await llm.ainvoke("Give me 2 interesting facts about Hyderabad retail with numbers only.")
     return fallback.content.strip()
 
 # === Vector ===
@@ -121,27 +114,23 @@ else:
     st.title("🚀 Retail Hyderabad Agent")
     uploaded_file = st.file_uploader("Upload your PDF to index", type=["pdf"])
     if uploaded_file:
-      with st.spinner("Indexing..."):
-          # === Save uploaded file to my-docs ===
-          os.makedirs("my-docs", exist_ok=True)
-          save_path = os.path.join("my-docs", uploaded_file.name)
-          with open(save_path, "wb") as f:
-              f.write(uploaded_file.getbuffer())
-  
-          # === Read text for vector ===
-          pdf_bytes = uploaded_file.read()
-          pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-          pages = [page.get_text().strip() for page in pdf_doc if page.get_text().strip()]
-          docs = [Document(page_content=t) for t in pages]
-          if docs:
-              vs = FAISS.from_documents(docs, embeddings)
-              vs.save_local(INDEX_PATH)
-              st.success(f"✅ Vector store created & file saved to my-docs! Reload to use it.")
-          else:
-              st.warning("No text found.")
+        with st.spinner("Indexing..."):
+            os.makedirs("my-docs", exist_ok=True)
+            save_path = os.path.join("my-docs", uploaded_file.name)
+            with open(save_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            pdf_bytes = uploaded_file.read()
+            pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            pages = [page.get_text().strip() for page in pdf_doc if page.get_text().strip()]
+            docs = [Document(page_content=t) for t in pages]
+            if docs:
+                vs = FAISS.from_documents(docs, embeddings)
+                vs.save_local(INDEX_PATH)
+                st.success(f"✅ Vector store created & file saved to my-docs! Reload to use it.")
+            else:
+                st.warning("No text found.")
 
-
-# === RAG Chain with fallback ===
+# === RAG Chain ===
 def get_retriever_chain():
     retriever = vs.as_retriever(search_type="similarity", search_kwargs={"k": 8})
     prompt = ChatPromptTemplate.from_messages([
@@ -156,25 +145,8 @@ def get_rag_chain(chain):
     (
         "system",
         """You are **Retailopedia**, an intelligent analytical retail assistant.
-
-You specialize in giving **crisp, factual, and number-driven insights** about retail markets, malls, brands, footfall trends, leasing metrics, and business performance.
-
-Your style is:
-- Always **concise** and to the point.
-- Backed by **quantitative data**, percentages, growth rates, or rankings whenever possible.
-- Neutral and factual — you do not make up fake numbers. If you don’t know, you say so clearly.
-- You always include **relevant figures, trends, or benchmarks** to strengthen your answers.
-- You never use fluff or filler — you sound like a retail analyst or consultant.
-- If context is available, use it fully and refer to specific facts, locations, timeframes, or sources.
-
-**Context:** {context}
-
-When asked, you may suggest additional datasets or metrics that could help the user.
-
-If the question is too broad, guide the user to narrow it down (e.g., location, timeframe, category).
-
-Be sharp, be brief, be numeric.
-
+Always provide crisp numeric answers.
+If appropriate, output your data as markdown tables.
 """
     ),
     MessagesPlaceholder("chat_history"),
@@ -183,7 +155,6 @@ Be sharp, be brief, be numeric.
     return create_retrieval_chain(chain, create_stuff_documents_chain(llm, prompt))
 
 async def vector_lookup(query: str) -> str:
-    """Try vector store, fallback to LLM if no match."""
     docs = vs.similarity_search(query, k=5)
     if not docs:
         fallback = await llm.ainvoke(f"User said: \"{query}\". Reply from general knowledge politely.")
@@ -192,8 +163,7 @@ async def vector_lookup(query: str) -> str:
     context = "\n\n".join([d.page_content for d in docs])
     chain = get_rag_chain(get_retriever_chain())
     result = await chain.ainvoke({"chat_history": [], "input": query, "context": context})
-    fact = await get_latest_retail_news()
-    return f"{result['answer']}"
+    return result["answer"]
 
 # === Deep Research ===
 class CustomLogsHandler:
@@ -202,20 +172,6 @@ class CustomLogsHandler:
 
     async def send_json(self, data: Dict[str, Any]) -> None:
         self.logs.append(data)
-
-async def run_gpt_researcher(query: str, logs_handler: CustomLogsHandler) -> str:
-    """Deep Research with GPTResearcher."""
-    researcher = GPTResearcher(
-        query=query,
-        report_type="research_report",
-        report_source="hybrid",
-        vector_store=vs,
-        websocket=logs_handler
-    )
-    await researcher.conduct_research()
-    report = await researcher.write_report()
-    fact = await get_latest_retail_news()
-    return f"{report}\n\n💡 **Hyderabad Retail Fact:** {fact}"
 
 def run_gpt_researcher_sync(query: str, logs_handler: CustomLogsHandler) -> str:
     return asyncio.get_event_loop().run_until_complete(run_gpt_researcher(query, logs_handler))
@@ -229,7 +185,6 @@ class State(BaseModel):
     answer: Optional[str] = None
 
 async def router(state: State):
-    res = await llm.ainvoke(f'Classify: "{state.query}". Return vector.')
     return {"route": "vector"}
 
 async def vector_node(state: State):
@@ -243,39 +198,53 @@ graph.add_edge("router", "vector")
 graph.add_edge("vector", END)
 agent = graph.compile()
 
-import asyncio
-import time
-import threading
-from io import BytesIO
+# === Plot helper ===
+def plot_markdown_table(response: str):
+    match = re.search(r"((\|.+\n)+)", response)
+    if not match:
+        return False
+    table_md = match.group(1)
+    lines = [line for line in table_md.strip().split("\n") if line.strip()]
+    if len(lines) < 2:
+        return False
+    cleaned_table = "\n".join(lines)
+    try:
+        df = pd.read_csv(StringIO(cleaned_table), sep="|")
+        df = df.dropna(axis=1, how="all")
+        df = df.drop(df.columns[0], axis=1)
+    except Exception as e:
+        print(f"Table parse error: {e}")
+        return False
 
-import streamlit as st
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.pagesizes import LETTER
-from reportlab.lib.styles import getSampleStyleSheet
+    fig, ax = plt.subplots()
+    if "Year" in df.columns[0]:
+        df[df.columns] = df[df.columns].apply(lambda x: pd.to_numeric(x, errors='ignore'))
+        df.set_index(df.columns[0], inplace=True)
+        df.plot(ax=ax, marker="o")
+    else:
+        df.plot(kind="bar", ax=ax)
 
+    st.pyplot(fig)
+    return True
 
+# === Main ===
 async def main():
-    # === Title ===
     st.markdown("<h1>Retail Agent</h1>", unsafe_allow_html=True)
-
-    # === Fresh fact on each load ===
     fact = await get_latest_retail_news()
     st.info(f"💡 **Retail Fact:** {fact}")
 
-    # === Init session state ===
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "deep_running" not in st.session_state:
-        st.session_state.deep_running = False
 
-    # === Render chat history ===
     for msg in st.session_state.messages:
         if msg["role"] == "user":
             st.markdown(f"<div class='user-msg'>👤 {msg['content']}</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div class='bot-msg'>🤖 {msg['content']}</div>", unsafe_allow_html=True)
+            plotted = plot_markdown_table(msg["content"])
+            if not plotted:
+                st.info("✅ No chart detected.")
 
-    # === Input & buttons ===
     col1, col2, col3 = st.columns([8, 1, 1])
     with col1:
         query = st.text_input(
@@ -287,9 +256,8 @@ async def main():
     with col2:
         send = st.button("➡️")
     with col3:
-        run_deep = st.button("🚀")
+        run_deep = st.button("🚀", disabled=True)  # ✅ Deep Research is visible but disabled
 
-    # === Handle normal ➡️ query ===
     if send and query:
         st.session_state.messages.append({"role": "user", "content": query})
         with st.spinner("Thinking..."):
@@ -300,100 +268,6 @@ async def main():
             st.session_state.messages.append({"role": "assistant", "content": answer})
         st.rerun()
 
-    # === Handle 🚀 Deep Research trigger ===
-    if run_deep:
-        if not query.strip():
-            st.warning("Enter a topic first.")
-        else:
-            st.session_state.deep_running = True
-
-    # === Run Deep Research with live logs ===
-    if st.session_state.deep_running:
-        def stream_research():
-            logs_handler = CustomLogsHandler()
-            result_holder = {"report": ""}
-
-            def run_and_store():
-                result_holder["report"] = run_gpt_researcher_sync(query, logs_handler)
-
-            t = threading.Thread(target=run_and_store)
-            t.start()
-
-            last_index = 0
-            logs_placeholder = st.empty()
-
-            while t.is_alive():
-                time.sleep(1)
-                new_logs = logs_handler.logs[last_index:]
-                for log in new_logs:
-                    logs_placeholder.markdown(
-                        f"🔍 **{log.get('content','')}**\n\n```\n{log.get('output','')}\n```",
-                        unsafe_allow_html=True
-                    )
-                last_index += len(new_logs)
-
-            final_report = result_holder["report"]
-            yield f"\n\n## ✅ Final Report\n\n{final_report}"
-
-            # === Build stylish PDF ===
-            pdf_buffer = BytesIO()
-            doc = SimpleDocTemplate(pdf_buffer, pagesize=LETTER)
-            styles = getSampleStyleSheet()
-            story = []
-
-            for line in final_report.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                elif line.startswith("# "):
-                    story.append(Paragraph(f"<b>{line.strip('# ').strip()}</b>", styles["Heading1"]))
-                elif line.startswith("## "):
-                    story.append(Paragraph(f"<b>{line.strip('# ').strip()}</b>", styles["Heading2"]))
-                elif "|" in line:
-                    cols = [c.strip() for c in line.split("|") if c.strip()]
-                    if not hasattr(stream_research, "_table_buffer"):
-                        stream_research._table_buffer = []
-                    stream_research._table_buffer.append(cols)
-                else:
-                    if hasattr(stream_research, "_table_buffer") and stream_research._table_buffer:
-                        table = Table(stream_research._table_buffer)
-                        table.setStyle(TableStyle([
-                            ("BACKGROUND", (0, 0), (-1, 0), "#d0d0d0"),
-                            ("GRID", (0, 0), (-1, -1), 1, "black"),
-                            ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-                        ]))
-                        story.append(table)
-                        story.append(Spacer(1, 12))
-                        stream_research._table_buffer = []
-                    story.append(Paragraph(f"<b>{line}</b>", styles["BodyText"]))
-                    story.append(Spacer(1, 6))
-
-            if hasattr(stream_research, "_table_buffer") and stream_research._table_buffer:
-                table = Table(stream_research._table_buffer)
-                table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, 0), "#d0d0d0"),
-                    ("GRID", (0, 0), (-1, -1), 1, "black"),
-                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-                ]))
-                story.append(table)
-                story.append(Spacer(1, 12))
-                stream_research._table_buffer = []
-
-            doc.build(story)
-            pdf_buffer.seek(0)
-
-            st.download_button(
-                "📄 Download Stylish Report as PDF",
-                data=pdf_buffer,
-                file_name="deep_research_stylish.pdf",
-                mime="application/pdf"
-            )
-
-            st.session_state.deep_running = False
-
-        st.write_stream(stream_research)
-
-    # === Branding at bottom ===
     st.markdown("<hr style='margin-top:50px; margin-bottom:10px;'>", unsafe_allow_html=True)
     st.markdown("🛠️ API by **WaysAhead**", unsafe_allow_html=True)
 

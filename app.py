@@ -1,7 +1,5 @@
 import os
 import asyncio
-import time
-import threading
 import nest_asyncio
 from dotenv import load_dotenv
 
@@ -87,11 +85,11 @@ llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.2)
 embeddings = OpenAIEmbeddings()
 INDEX_PATH = "./faiss_index"
 
-# === Get Hyderabad fact ===
+# === Tavily Search ===
 tavily = TavilySearchResults(k=5)
 
 async def get_latest_retail_news() -> str:
-    """Fetch latest retail news snippets about Hyderabad or Inorbit Mall as a fallback fact."""
+    """Fetch live retail news about Hyderabad or fallback to a numeric fact."""
     query = (
         "latest Hyderabad retail news OR Inorbit Mall site:business-standard.com "
         "OR site:economictimes.indiatimes.com OR site:newsmeter.in"
@@ -132,7 +130,7 @@ else:
                 st.warning("No text found.")
 
 def get_retriever_chain():
-    """Return a history-aware retriever chain for RAG."""
+    """Create a history-aware vector retriever chain."""
     retriever = vs.as_retriever(search_type="similarity", search_kwargs={"k": 8})
     prompt = ChatPromptTemplate.from_messages([
         MessagesPlaceholder("chat_history"),
@@ -142,22 +140,27 @@ def get_retriever_chain():
     return create_history_aware_retriever(llm, retriever, prompt)
 
 def get_rag_chain(chain):
-    """Return the final retrieval + answer chain for RAG with style prompt."""
-    prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """You are **Retailopedia**, an intelligent analytical retail assistant.
+    """Return the final RAG chain with context variable declared."""
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                """You are **Retailopedia**, an intelligent analytical retail assistant.
 Always provide crisp numeric answers.
 If appropriate, output your data as markdown tables.
+
+**Context:** {context}
 """
-    ),
-    MessagesPlaceholder("chat_history"),
-    ("user", "{input}"),
-])
+            ),
+            MessagesPlaceholder("chat_history"),
+            ("user", "{input}"),
+        ],
+        input_variables=["context", "chat_history", "input"]
+    )
     return create_retrieval_chain(chain, create_stuff_documents_chain(llm, prompt))
 
 async def vector_lookup(query: str) -> str:
-    """Try vector store lookup; fallback to LLM with a Hyderabad fact if no match."""
+    """Run similarity search or fallback to LLM with news fact."""
     docs = vs.similarity_search(query, k=5)
     if not docs:
         fallback = await llm.ainvoke(f"User said: \"{query}\". Reply politely.")
@@ -169,31 +172,27 @@ async def vector_lookup(query: str) -> str:
     return result["answer"]
 
 class CustomLogsHandler:
-    """Handle logs for GPTResearcher deep research actions."""
+    """Handle logs for GPTResearcher."""
     def __init__(self):
         self.logs: List[Dict[str, Any]] = []
 
     async def send_json(self, data: Dict[str, Any]) -> None:
         self.logs.append(data)
 
-def run_gpt_researcher_sync(query: str, logs_handler: CustomLogsHandler) -> str:
-    """Run GPTResearcher synchronously to return deep research report."""
-    return asyncio.get_event_loop().run_until_complete(run_gpt_researcher(query, logs_handler))
-
 vector_tool = StructuredTool.from_function(vector_lookup)
 
 class State(BaseModel):
-    """LangGraph shared state model."""
+    """LangGraph state model."""
     query: str
     route: Optional[str] = None
     answer: Optional[str] = None
 
 async def router(state: State):
-    """Router node: currently always route to vector search."""
+    """Route input to vector node."""
     return {"route": "vector"}
 
 async def vector_node(state: State):
-    """Vector node: runs the vector lookup and returns the answer."""
+    """Vector node for vector tool lookup."""
     return {"answer": await vector_tool.ainvoke({"query": state.query})}
 
 graph = StateGraph(State)
@@ -205,7 +204,7 @@ graph.add_edge("vector", END)
 agent = graph.compile()
 
 def plot_markdown_table(response: str):
-    """If a markdown table is detected in the response, parse and plot it."""
+    """Detect markdown table and plot chart if found."""
     match = re.search(r"((\|.+\n)+)", response)
     if not match:
         return False
@@ -234,7 +233,7 @@ def plot_markdown_table(response: str):
     return True
 
 async def main():
-    """Main Streamlit app loop for Retail Agent."""
+    """Main Streamlit app entrypoint."""
     st.markdown("<h1>Retail Agent</h1>", unsafe_allow_html=True)
     fact = await get_latest_retail_news()
     st.info(f"💡 **Retail Fact:** {fact}")
@@ -262,7 +261,7 @@ async def main():
     with col2:
         send = st.button("➡️")
     with col3:
-        run_deep = st.button("🚀", disabled=True)  # 🚀 Deep Research button stays disabled
+        run_deep = st.button("🚀", disabled=True)  # ✅ Still disabled
 
     if send and query:
         st.session_state.messages.append({"role": "user", "content": query})

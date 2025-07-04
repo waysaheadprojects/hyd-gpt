@@ -91,6 +91,7 @@ INDEX_PATH = "./faiss_index"
 tavily = TavilySearchResults(k=5)
 
 async def get_latest_retail_news() -> str:
+    """Fetch latest retail news snippets about Hyderabad or Inorbit Mall as a fallback fact."""
     query = (
         "latest Hyderabad retail news OR Inorbit Mall site:business-standard.com "
         "OR site:economictimes.indiatimes.com OR site:newsmeter.in"
@@ -104,7 +105,7 @@ async def get_latest_retail_news() -> str:
             content = r.get("content", "")
             items.append(f"🔗 **{title}**\n{content}\n👉 [Read more]({url})\n")
         return "\n\n".join(items)
-    fallback = await llm.ainvoke("Give me 2 interesting facts about Hyderabad retail with numbers only.")
+    fallback = await llm.ainvoke("Give 2 numeric facts about Hyderabad retail.")
     return fallback.content.strip()
 
 # === Vector ===
@@ -130,8 +131,8 @@ else:
             else:
                 st.warning("No text found.")
 
-# === RAG Chain ===
 def get_retriever_chain():
+    """Return a history-aware retriever chain for RAG."""
     retriever = vs.as_retriever(search_type="similarity", search_kwargs={"k": 8})
     prompt = ChatPromptTemplate.from_messages([
         MessagesPlaceholder("chat_history"),
@@ -141,6 +142,7 @@ def get_retriever_chain():
     return create_history_aware_retriever(llm, retriever, prompt)
 
 def get_rag_chain(chain):
+    """Return the final retrieval + answer chain for RAG with style prompt."""
     prompt = ChatPromptTemplate.from_messages([
     (
         "system",
@@ -155,9 +157,10 @@ If appropriate, output your data as markdown tables.
     return create_retrieval_chain(chain, create_stuff_documents_chain(llm, prompt))
 
 async def vector_lookup(query: str) -> str:
+    """Try vector store lookup; fallback to LLM with a Hyderabad fact if no match."""
     docs = vs.similarity_search(query, k=5)
     if not docs:
-        fallback = await llm.ainvoke(f"User said: \"{query}\". Reply from general knowledge politely.")
+        fallback = await llm.ainvoke(f"User said: \"{query}\". Reply politely.")
         fact = await get_latest_retail_news()
         return f"{fallback.content.strip()}\n\n💡 **Hyderabad Retail Fact:** {fact}"
     context = "\n\n".join([d.page_content for d in docs])
@@ -165,8 +168,8 @@ async def vector_lookup(query: str) -> str:
     result = await chain.ainvoke({"chat_history": [], "input": query, "context": context})
     return result["answer"]
 
-# === Deep Research ===
 class CustomLogsHandler:
+    """Handle logs for GPTResearcher deep research actions."""
     def __init__(self):
         self.logs: List[Dict[str, Any]] = []
 
@@ -174,20 +177,23 @@ class CustomLogsHandler:
         self.logs.append(data)
 
 def run_gpt_researcher_sync(query: str, logs_handler: CustomLogsHandler) -> str:
+    """Run GPTResearcher synchronously to return deep research report."""
     return asyncio.get_event_loop().run_until_complete(run_gpt_researcher(query, logs_handler))
 
-# === LangGraph ===
 vector_tool = StructuredTool.from_function(vector_lookup)
 
 class State(BaseModel):
+    """LangGraph shared state model."""
     query: str
     route: Optional[str] = None
     answer: Optional[str] = None
 
 async def router(state: State):
+    """Router node: currently always route to vector search."""
     return {"route": "vector"}
 
 async def vector_node(state: State):
+    """Vector node: runs the vector lookup and returns the answer."""
     return {"answer": await vector_tool.ainvoke({"query": state.query})}
 
 graph = StateGraph(State)
@@ -198,8 +204,8 @@ graph.add_edge("router", "vector")
 graph.add_edge("vector", END)
 agent = graph.compile()
 
-# === Plot helper ===
 def plot_markdown_table(response: str):
+    """If a markdown table is detected in the response, parse and plot it."""
     match = re.search(r"((\|.+\n)+)", response)
     if not match:
         return False
@@ -227,8 +233,8 @@ def plot_markdown_table(response: str):
     st.pyplot(fig)
     return True
 
-# === Main ===
 async def main():
+    """Main Streamlit app loop for Retail Agent."""
     st.markdown("<h1>Retail Agent</h1>", unsafe_allow_html=True)
     fact = await get_latest_retail_news()
     st.info(f"💡 **Retail Fact:** {fact}")
@@ -256,7 +262,7 @@ async def main():
     with col2:
         send = st.button("➡️")
     with col3:
-        run_deep = st.button("🚀", disabled=True)  # ✅ Deep Research is visible but disabled
+        run_deep = st.button("🚀", disabled=True)  # 🚀 Deep Research button stays disabled
 
     if send and query:
         st.session_state.messages.append({"role": "user", "content": query})

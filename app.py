@@ -138,26 +138,27 @@ def get_retriever_chain():
         ("user", "Generate a precise search query.")
     ])
     return create_history_aware_retriever(llm, retriever, prompt)
-
+  
 def get_rag_chain(chain):
-    """Return the final RAG chain with context variable declared correctly."""
+    """Return RAG chain with a prompt that properly accepts context."""
     prompt = ChatPromptTemplate.from_messages(
         [
             (
                 "system",
-                """You are **Retailopedia**, an intelligent analytical retail assistant.
-Always provide crisp numeric answers.
-If appropriate, output your data as markdown tables.
+                """You are Retailopedia, an analytical retail assistant.
+Provide crisp numeric answers and use markdown tables if relevant.
 
-**Context:** {context}
+Context from documents:
+{context}
 """
             ),
             MessagesPlaceholder("chat_history"),
             ("user", "{input}"),
         ],
-        input_variables=["context", "chat_history", "input"]  # ✅ Declare context here
+        input_variables=["context", "chat_history", "input"]  # ✅ Crucial addition
     )
     return create_retrieval_chain(chain, create_stuff_documents_chain(llm, prompt))
+
 
 
 async def vector_lookup(query: str) -> str:

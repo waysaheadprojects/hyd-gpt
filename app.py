@@ -140,7 +140,7 @@ def get_retriever_chain():
     return create_history_aware_retriever(llm, retriever, prompt)
 
 def get_rag_chain(chain):
-    """Return the final RAG chain with context variable declared."""
+    """Return the final RAG chain with context variable declared correctly."""
     prompt = ChatPromptTemplate.from_messages(
         [
             (
@@ -155,9 +155,10 @@ If appropriate, output your data as markdown tables.
             MessagesPlaceholder("chat_history"),
             ("user", "{input}"),
         ],
-        input_variables=["context", "chat_history", "input"]
+        input_variables=["context", "chat_history", "input"]  # ✅ Declare context here
     )
     return create_retrieval_chain(chain, create_stuff_documents_chain(llm, prompt))
+
 
 async def vector_lookup(query: str) -> str:
     """Run similarity search or fallback to LLM with news fact."""

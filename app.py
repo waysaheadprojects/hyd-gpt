@@ -103,7 +103,7 @@ async def get_latest_retail_news() -> str:
             content = r.get("content", "")
             items.append(f"🔗 **{title}**\n{content}\n👉 [Read more]({url})\n")
         return "\n\n".join(items)
-    fallback = await llm.ainvoke("Give 2 numeric facts about Hyderabad retail.")
+    fallback = await llm.ainvoke("Give 2 numeric facts about Hyderabad retail. just the facts no bold or italics normal facts just")
     return fallback.content.strip()
 
 # === Vector ===
@@ -154,6 +154,7 @@ Your style is:
 - You always include **relevant figures, trends, or benchmarks** to strengthen your answers.
 - You never use fluff or filler — you sound like a retail analyst or consultant.
 - If context is available, use it fully and refer to specific facts, locations, timeframes, or sources.
+-
 
 **Context:** {context}
 
